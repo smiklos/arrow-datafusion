@@ -161,6 +161,10 @@ name = "sql_query_with_io"
 harness = false
 name = "sort"
 
+[[bench]]
+harness = false
+name = "unnest_query"
+
 [[test]]
 harness = false
 name = "sqllogictests"
