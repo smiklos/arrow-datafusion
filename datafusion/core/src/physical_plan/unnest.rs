@@ -274,7 +274,7 @@ where
     //
     // the result array is:
     //
-    //   1, null, 2, 3, 4, null, 5, 6
+    //   1, 2, 3, 4, 5, 6
     //
     let unnested_array = unnest_array(list_array)?;
 
@@ -329,10 +329,10 @@ where
 /// the result indices array is:
 ///
 /// ```ignore
-/// 0, 1, 2, 2, 2, 3, 4, 4
+/// 0, 2, 2, 2, 4, 4
 /// ```
 ///
-/// where a null value count as one element.
+/// where rows with null values are removed.
 fn create_take_indices<T>(
     list_lengths: &PrimitiveArray<T>,
     capacity: usize,
@@ -342,14 +342,12 @@ where
 {
     let mut builder = PrimitiveArray::<T>::builder(capacity);
     for row in 0..list_lengths.len() {
-        let repeat = if list_lengths.is_null(row) {
-            T::Native::ONE
-        } else {
-            list_lengths.value(row)
-        };
+        if list_lengths.is_null(row) {
+            continue;
+        }
 
         // Both `repeat` and `index` are positive intergers.
-        let repeat = repeat.to_usize().unwrap();
+        let repeat =  list_lengths.value(row).to_usize().unwrap();
         let index = T::Native::from_usize(row).unwrap();
         (0..repeat).for_each(|_| builder.append_value(index));
     }
@@ -444,11 +442,11 @@ where
 
     // Create a vec of ArrayRef from the list elements.
     let arrays = (0..list_array.len())
-        .map(|row| {
+        .filter_map(|row| {
             if list_array.is_null(row) {
-                null_row.clone()
+                None
             } else {
-                list_array.value(row)
+                Some(list_array.value(row))
             }
         })
         .collect::<Vec<_>>();
