@@ -18,12 +18,12 @@
 //! Defines the unnest column plan for unnesting values in a column that contains a list
 //! type, conceptually is like joining each row with all the values in the list column.
 use arrow::array::{
-    new_null_array, Array, ArrayAccessor, ArrayRef, ArrowPrimitiveType,
-    FixedSizeListArray, Int32Array, LargeListArray, ListArray, PrimitiveArray,
+    Array, ArrayAccessor, ArrayRef, ArrowPrimitiveType, FixedSizeListArray, Int32Array,
+    LargeListArray, ListArray, PrimitiveArray,
 };
 use arrow::compute::kernels;
 use arrow::datatypes::{
-    ArrowNativeType, ArrowNativeTypeOp, DataType, Int32Type, Int64Type, Schema, SchemaRef,
+    ArrowNativeType, DataType, Int32Type, Int64Type, Schema, SchemaRef,
 };
 use arrow::record_batch::RecordBatch;
 use async_trait::async_trait;
@@ -347,7 +347,7 @@ where
         }
 
         // Both `repeat` and `index` are positive intergers.
-        let repeat =  list_lengths.value(row).to_usize().unwrap();
+        let repeat = list_lengths.value(row).to_usize().unwrap();
         let index = T::Native::from_usize(row).unwrap();
         (0..repeat).for_each(|_| builder.append_value(index));
     }
@@ -427,19 +427,6 @@ fn unnest_array<T>(list_array: &T) -> Result<Arc<dyn Array + 'static>>
 where
     T: ArrayAccessor<Item = ArrayRef>,
 {
-    let elem_type = match list_array.data_type() {
-        DataType::List(f) | DataType::FixedSizeList(f, _) | DataType::LargeList(f) => {
-            f.data_type()
-        }
-        dt => {
-            return Err(DataFusionError::Execution(format!(
-                "Cannot unnest array of type {dt}"
-            )))
-        }
-    };
-
-    let null_row = new_null_array(elem_type, 1);
-
     // Create a vec of ArrayRef from the list elements.
     let arrays = (0..list_array.len())
         .filter_map(|row| {

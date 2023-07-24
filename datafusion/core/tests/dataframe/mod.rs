@@ -942,92 +942,77 @@ async fn right_anti_filter_push_down() -> Result<()> {
 
 #[tokio::test]
 async fn unnest_columns() -> Result<()> {
-    const NUM_ROWS: usize = 4;
-    let df = table_with_nested_types(NUM_ROWS).await?;
-    let results = df.collect().await?;
-    let expected = vec![
-        "+----------+------------------------------------------------+--------------------+",
-        "| shape_id | points                                         | tags               |",
-        "+----------+------------------------------------------------+--------------------+",
-        "| 1        | [{x: -3, y: -4}, {x: -3, y: 6}, {x: 2, y: -2}] | [tag1]             |",
-        "| 2        |                                                | [tag1, tag2]       |",
-        "| 3        | [{x: -9, y: 2}, {x: -10, y: -4}]               |                    |",
-        "| 4        | [{x: -3, y: 5}, {x: 2, y: -1}]                 | [tag1, tag2, tag3] |",
-        "+----------+------------------------------------------------+--------------------+",
-    ];
-    assert_batches_sorted_eq!(expected, &results);
-
     // Unnest tags
-    let df = table_with_nested_types(NUM_ROWS).await?;
+    let df = table_with_nested_types().await?;
     let results = df.unnest_column("tags")?.collect().await?;
     let expected = vec![
-        "+----------+------------------------------------------------+------+",
-        "| shape_id | points                                         | tags |",
-        "+----------+------------------------------------------------+------+",
-        "| 1        | [{x: -3, y: -4}, {x: -3, y: 6}, {x: 2, y: -2}] | tag1 |",
-        "| 2        |                                                | tag1 |",
-        "| 2        |                                                | tag2 |",
-        "| 4        | [{x: -3, y: 5}, {x: 2, y: -1}]                 | tag1 |",
-        "| 4        | [{x: -3, y: 5}, {x: 2, y: -1}]                 | tag2 |",
-        "| 4        | [{x: -3, y: 5}, {x: 2, y: -1}]                 | tag3 |",
-        "+----------+------------------------------------------------+------+",
+        "+----------+--------------------------------------------+------+",
+        "| shape_id | points                                     | tags |",
+        "+----------+--------------------------------------------+------+",
+        "| 1        | [{x: 1, y: 1}, {x: 2, y: 2}, {x: 3, y: 3}] | tag1 |",
+        "| 2        |                                            | tag1 |",
+        "| 2        |                                            | tag2 |",
+        "| 4        | [{x: 1, y: 1}, {x: 2, y: 2}]               | tag1 |",
+        "| 4        | [{x: 1, y: 1}, {x: 2, y: 2}]               | tag2 |",
+        "| 4        | [{x: 1, y: 1}, {x: 2, y: 2}]               | tag3 |",
+        "+----------+--------------------------------------------+------+",
     ];
     assert_batches_sorted_eq!(expected, &results);
 
     // Test aggregate results for tags.
-    let df = table_with_nested_types(NUM_ROWS).await?;
+    let df = table_with_nested_types().await?;
     let count = df.unnest_column("tags")?.count().await?;
     assert_eq!(count, results.iter().map(|r| r.num_rows()).sum::<usize>());
 
     // Unnest points
-    let df = table_with_nested_types(NUM_ROWS).await?;
+    let df = table_with_nested_types().await?;
     let results = df.unnest_column("points")?.collect().await?;
     let expected = vec![
-        "+----------+-----------------+--------------------+",
-        "| shape_id | points          | tags               |",
-        "+----------+-----------------+--------------------+",
-        "| 1        | {x: -3, y: -4}  | [tag1]             |",
-        "| 1        | {x: -3, y: 6}   | [tag1]             |",
-        "| 1        | {x: 2, y: -2}   | [tag1]             |",
-        "| 3        | {x: -10, y: -4} |                    |",
-        "| 3        | {x: -9, y: 2}   |                    |",
-        "| 4        | {x: -3, y: 5}   | [tag1, tag2, tag3] |",
-        "| 4        | {x: 2, y: -1}   | [tag1, tag2, tag3] |",
-        "+----------+-----------------+--------------------+",
+        "+----------+--------------+--------------------+",
+        "| shape_id | points       | tags               |",
+        "+----------+--------------+--------------------+",
+        "| 1        | {x: 1, y: 1} | [tag1]             |",
+        "| 1        | {x: 2, y: 2} | [tag1]             |",
+        "| 1        | {x: 3, y: 3} | [tag1]             |",
+        "| 3        | {x: 1, y: 1} |                    |",
+        "| 3        | {x: 2, y: 2} |                    |",
+        "| 4        | {x: 1, y: 1} | [tag1, tag2, tag3] |",
+        "| 4        | {x: 2, y: 2} | [tag1, tag2, tag3] |",
+        "+----------+--------------+--------------------+",
     ];
     assert_batches_sorted_eq!(expected, &results);
 
     // Test aggregate results for points.
-    let df = table_with_nested_types(NUM_ROWS).await?;
+    let df = table_with_nested_types().await?;
     let count = df.unnest_column("points")?.count().await?;
     assert_eq!(count, results.iter().map(|r| r.num_rows()).sum::<usize>());
 
     // Unnest both points and tags.
-    let df = table_with_nested_types(NUM_ROWS).await?;
+    let df = table_with_nested_types().await?;
     let results = df
         .unnest_column("points")?
         .unnest_column("tags")?
         .collect()
         .await?;
     let expected = vec![
-        "+----------+----------------+------+",
-        "| shape_id | points         | tags |",
-        "+----------+----------------+------+",
-        "| 1        | {x: -3, y: -4} | tag1 |",
-        "| 1        | {x: -3, y: 6}  | tag1 |",
-        "| 1        | {x: 2, y: -2}  | tag1 |",
-        "| 4        | {x: -3, y: 5}  | tag1 |",
-        "| 4        | {x: -3, y: 5}  | tag2 |",
-        "| 4        | {x: -3, y: 5}  | tag3 |",
-        "| 4        | {x: 2, y: -1}  | tag1 |",
-        "| 4        | {x: 2, y: -1}  | tag2 |",
-        "| 4        | {x: 2, y: -1}  | tag3 |",
-        "+----------+----------------+------+",
+        "+----------+--------------+------+",
+        "| shape_id | points       | tags |",
+        "+----------+--------------+------+",
+        "| 1        | {x: 1, y: 1} | tag1 |",
+        "| 1        | {x: 2, y: 2} | tag1 |",
+        "| 1        | {x: 3, y: 3} | tag1 |",
+        "| 4        | {x: 1, y: 1} | tag1 |",
+        "| 4        | {x: 1, y: 1} | tag2 |",
+        "| 4        | {x: 1, y: 1} | tag3 |",
+        "| 4        | {x: 2, y: 2} | tag1 |",
+        "| 4        | {x: 2, y: 2} | tag2 |",
+        "| 4        | {x: 2, y: 2} | tag3 |",
+        "+----------+--------------+------+",
     ];
     assert_batches_sorted_eq!(expected, &results);
 
     // Test aggregate results for points and tags.
-    let df = table_with_nested_types(NUM_ROWS).await?;
+    let df = table_with_nested_types().await?;
     let count = df
         .unnest_column("points")?
         .unnest_column("tags")?
@@ -1108,9 +1093,7 @@ async fn unnest_fixed_list() -> Result<()> {
 
 #[tokio::test]
 async fn unnest_aggregate_columns() -> Result<()> {
-    const NUM_ROWS: usize = 5;
-
-    let df = table_with_nested_types(NUM_ROWS).await?;
+    let df = table_with_nested_types().await?;
     let results = df.select_columns(&["tags"])?.collect().await?;
     let expected = vec![
         r#"+--------------------+"#,
@@ -1120,12 +1103,11 @@ async fn unnest_aggregate_columns() -> Result<()> {
         r#"| [tag1, tag2]       |"#,
         r#"|                    |"#,
         r#"| [tag1, tag2, tag3] |"#,
-        r#"| [tag1, tag2, tag3] |"#,
         r#"+--------------------+"#,
     ];
     assert_batches_sorted_eq!(expected, &results);
 
-    let df = table_with_nested_types(NUM_ROWS).await?;
+    let df = table_with_nested_types().await?;
     let results = df
         .unnest_column("tags")?
         .aggregate(vec![], vec![count(col("tags"))])?
@@ -1135,7 +1117,7 @@ async fn unnest_aggregate_columns() -> Result<()> {
         r#"+--------------------+"#,
         r#"| COUNT(shapes.tags) |"#,
         r#"+--------------------+"#,
-        r#"| 9                  |"#,
+        r#"| 6                  |"#,
         r#"+--------------------+"#,
     ];
     assert_batches_sorted_eq!(expected, &results);
@@ -1225,9 +1207,7 @@ fn create_join_context() -> Result<SessionContext> {
 /// - shape_id an integer primary key
 /// - points A list of points structs {x, y}
 /// - A list of tags.
-async fn table_with_nested_types(n: usize) -> Result<DataFrame> {
-    use rand::prelude::*;
-
+async fn table_with_nested_types() -> Result<DataFrame> {
     let mut shape_id_builder = UInt32Builder::new();
     let mut points_builder = ListBuilder::new(StructBuilder::from_fields(
         vec![
@@ -1238,42 +1218,60 @@ async fn table_with_nested_types(n: usize) -> Result<DataFrame> {
     ));
     let mut tags_builder = ListBuilder::new(StringBuilder::new());
 
-    let mut rng = StdRng::seed_from_u64(197);
+    let mut append_points = |p: Option<&[(i32, i32)]>| -> () {
+        match p {
+            None => points_builder.append(false),
+            Some(points) => {
+                for (x, y) in points {
+                    points_builder
+                        .values()
+                        .field_builder::<Int32Builder>(0)
+                        .unwrap()
+                        .append_value(*x);
 
-    for idx in 0..n {
-        // Append shape id.
-        shape_id_builder.append_value(idx as u32 + 1);
-
-        // Add a random number of points
-        let num_points: usize = rng.gen_range(0..4);
-        if num_points > 0 {
-            for _ in 0..num_points.max(2) {
-                // Add x value
-                points_builder
-                    .values()
-                    .field_builder::<Int32Builder>(0)
-                    .unwrap()
-                    .append_value(rng.gen_range(-10..10));
-                // Add y value
-                points_builder
-                    .values()
-                    .field_builder::<Int32Builder>(1)
-                    .unwrap()
-                    .append_value(rng.gen_range(-10..10));
-                points_builder.values().append(true);
+                    points_builder
+                        .values()
+                        .field_builder::<Int32Builder>(1)
+                        .unwrap()
+                        .append_value(*y);
+                    points_builder.values().append(true);
+                }
+                points_builder.append(true);
             }
         }
+    };
 
-        // Append null if num points is 0.
-        points_builder.append(num_points > 0);
-
-        // Append tags.
-        let num_tags: usize = rng.gen_range(0..5);
-        for id in 0..num_tags {
-            tags_builder.values().append_value(format!("tag{}", id + 1));
-        }
-        tags_builder.append(num_tags > 0);
+    // Create 5 rows for testing
+    for i in 1..5 {
+        shape_id_builder.append_value(i as u32);
     }
+    // 1        | [{x: -3, y: -4}, {x: -3, y: 6}, {x: 2, y: -2}] | [tag1]             |",
+    // "| 2        |                                                | [tag1, tag2]       |",
+    // "| 3        | [{x: -9, y: 2}, {x: -10, y: -4}]               |                    |",
+    // "| 4        | [{x: -3, y: 5}, {x: 2, y: -1}]                 | [tag1, tag2, tag3] |",
+    //row 1
+    tags_builder.values().append_value("tag1");
+    tags_builder.append(true);
+    append_points(Some(&[(1, 1), (2, 2), (3, 3)]));
+
+    // row 2
+    tags_builder.values().append_value("tag1");
+    tags_builder.values().append_value("tag2");
+    tags_builder.append(true);
+    append_points(None);
+    // row 3
+    tags_builder.append(false);
+    append_points(Some(&[(1, 1), (2, 2)]));
+
+    // row 4
+    tags_builder.values().append_value("tag1");
+    tags_builder.values().append_value("tag2");
+    tags_builder.values().append_value("tag3");
+    tags_builder.append(true);
+    append_points(Some(&[(1, 1), (2, 2)]));
+
+    // row 5
+    //tags_builder.append(true);
 
     let batch = RecordBatch::try_from_iter(vec![
         ("shape_id", Arc::new(shape_id_builder.finish()) as ArrayRef),
