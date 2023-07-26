@@ -439,15 +439,19 @@ where
 
         let array: PrimitiveArray<T> = if nulls.null_count() > 0 {
             let mut builder = PrimitiveBuilder::<T>::with_capacity(nulls.len());
-            let iter = sums.into_iter().zip(counts.into_iter()).zip(nulls.iter());
+            //let iter = sums_iter.zip(counts_iter).zip(nulls_iter);
 
-            for ((sum, count), is_valid) in iter {
+            for i in 0..sums.len() {
+                let sum = sums[i];
+                let count = counts[i];
+                let is_valid = nulls.is_null(i);
                 if is_valid {
                     builder.append_value((self.avg_fn)(sum, count)?)
                 } else {
                     builder.append_null();
                 }
             }
+
             builder.finish()
         } else {
             let averages: Vec<T::Native> = sums
