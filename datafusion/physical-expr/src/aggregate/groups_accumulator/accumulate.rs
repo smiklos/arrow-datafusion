@@ -20,7 +20,7 @@
 //! [`GroupsAccumulator`]: crate::GroupsAccumulator
 
 use arrow::datatypes::ArrowPrimitiveType;
-use arrow_array::{Array, BooleanArray, PrimitiveArray};
+use arrow_array::{Array, BooleanArray, PrimitiveArray, types::{ UInt64Type}};
 use arrow_buffer::{BooleanBuffer, BooleanBufferBuilder, NullBuffer};
 
 use crate::EmitTo;
@@ -60,20 +60,25 @@ pub struct NullState {
     /// If `seen_values[i]` is false, have not seen any values that
     /// pass the filter yet for group `i`
     seen_values: BooleanBufferBuilder,
+    total_groups: usize
 }
 
 impl NullState {
     pub fn new() -> Self {
         Self {
             seen_values: BooleanBufferBuilder::new(0),
+            total_groups: 0
         }
     }
 
     /// return the size of all buffers allocated by this null state, not including self
     pub fn size(&self) -> usize {
         // capacity is in bits, so convert to bytes
-        self.seen_values.capacity() / 8
+        let size = self.seen_values.capacity() / 8;
+        //println!("Capacity is {} and total_groups_is {}", size, self.total_groups);
+        size
     }
+
 
     /// Invokes `value_fn(group_index, value)` for each non null, non
     /// filtered value of `value`, while tracking which groups have
@@ -131,7 +136,7 @@ impl NullState {
     {
         let data: &[T::Native] = values.values();
         assert_eq!(data.len(), group_indices.len());
-
+        self.total_groups = total_num_groups;
         // ensure the seen_values is big enough (start everything at
         // "not seen" valid)
         let seen_values =
@@ -230,6 +235,112 @@ impl NullState {
         }
     }
 
+
+    pub fn accumulate_spec(
+        &mut self,
+        group_indices: &[usize],
+        values: &PrimitiveArray<UInt64Type>,
+        opt_filter: Option<&BooleanArray>,
+        total_num_groups: usize,
+    )  {
+        let data: &[u64] = values.values();
+        assert_eq!(data.len(), group_indices.len());
+
+        // ensure the seen_values is big enough (start everything at
+        // "not seen" valid)
+        let seen_values =
+            initialize_builder(&mut self.seen_values, total_num_groups, false);
+
+        match (values.null_count() > 0, opt_filter) {
+            // no nulls, no filter,
+            (false, None) => {
+                for &group_index in group_indices.iter() {
+                    seen_values.set_bit(group_index, true);
+                }
+            }
+            // nulls, no filter
+            (true, None) => {
+                let nulls = values.nulls().unwrap();
+                // This is based on (ahem, COPY/PASTE) arrow::compute::aggregate::sum
+                // iterate over in chunks of 64 bits for more efficient null checking
+                let group_indices_chunks = group_indices.chunks_exact(64);
+                let data_chunks = data.chunks_exact(64);
+                let bit_chunks = nulls.inner().bit_chunks();
+
+                let group_indices_remainder = group_indices_chunks.remainder();
+                let data_remainder = data_chunks.remainder();
+
+                group_indices_chunks
+                    .zip(data_chunks)
+                    .zip(bit_chunks.iter())
+                    .for_each(|((group_index_chunk, data_chunk), mask)| {
+                        // index_mask has value 1 << i in the loop
+                        let mut index_mask = 1;
+                        group_index_chunk.iter().zip(data_chunk.iter()).for_each(
+                            |(&group_index, &_new_value)| {
+                                // valid bit was set, real value
+                                let is_valid = (mask & index_mask) != 0;
+                                if is_valid {
+                                    seen_values.set_bit(group_index, true);
+                                    //value_fn(group_index, new_value);
+                                }
+                                index_mask <<= 1;
+                            },
+                        )
+                    });
+
+                // handle any remaining bits (after the initial 64)
+                let remainder_bits = bit_chunks.remainder_bits();
+                group_indices_remainder
+                    .iter()
+                    .zip(data_remainder.iter())
+                    .enumerate()
+                    .for_each(|(i, (&group_index, &new_value))| {
+                        let is_valid = remainder_bits & (1 << i) != 0;
+                        if is_valid {
+                            seen_values.set_bit(group_index, true);
+                            //value_fn(group_index, new_value);
+                        }
+                    });
+            }
+            // no nulls, but a filter
+            (false, Some(filter)) => {
+                assert_eq!(filter.len(), group_indices.len());
+                // The performance with a filter could be improved by
+                // iterating over the filter in chunks, rather than a single
+                // iterator. TODO file a ticket
+                group_indices
+                    .iter()
+                    .zip(data.iter())
+                    .zip(filter.iter())
+                    .for_each(|((&group_index, &new_value), filter_value)| {
+                        if let Some(true) = filter_value {
+                            seen_values.set_bit(group_index, true);
+                            //value_fn(group_index, new_value);
+                        }
+                    })
+            }
+            // both null values and filters
+            (true, Some(filter)) => {
+                assert_eq!(filter.len(), group_indices.len());
+                // The performance with a filter could be improved by
+                // iterating over the filter in chunks, rather than using
+                // iterators. TODO file a ticket
+                filter
+                    .iter()
+                    .zip(group_indices.iter())
+                    .zip(values.iter())
+                    .for_each(|((filter_value, &group_index), new_value)| {
+                        if let Some(true) = filter_value {
+                            if let Some(new_value) = new_value {
+                                seen_values.set_bit(group_index, true);
+                                //value_fn(group_index, new_value)
+                            }
+                        }
+                    })
+            }
+        }
+    }
     /// Invokes `value_fn(group_index, value)` for each non null, non
     /// filtered value in `values`, while tracking which groups have
     /// seen null inputs and which groups have seen any inputs, for
@@ -252,7 +363,7 @@ impl NullState {
     {
         let data = values.values();
         assert_eq!(data.len(), group_indices.len());
-
+        self.total_groups = total_num_groups;
         // ensure the seen_values is big enough (start everything at
         // "not seen" valid)
         let seen_values =
@@ -319,12 +430,13 @@ impl NullState {
         }
     }
 
-    /// Creates the a [`NullBuffer`] representing which group_indices
+    /// Creates the [`NullBuffer`] representing which group_indices
     /// should have null values (because they never saw any values)
     /// for the `emit_to` rows.
     ///
     /// resets the internal state appropriately
     pub fn build(&mut self, emit_to: EmitTo) -> NullBuffer {
+        //self.seen_values.truncate(self.total_groups);
         let nulls: BooleanBuffer = self.seen_values.finish();
 
         let nulls = match emit_to {
@@ -448,6 +560,8 @@ fn initialize_builder(
 ) -> &mut BooleanBufferBuilder {
     if builder.len() < total_num_groups {
         let new_groups = total_num_groups - builder.len();
+        let grow_by = builder.len() * 2;
+        //println!("Need to grow by {} because total group size is {}", new_groups, total_num_groups);
         builder.append_n(new_groups, default_value);
     }
     builder
