@@ -560,9 +560,9 @@ fn initialize_builder(
 ) -> &mut BooleanBufferBuilder {
     if builder.len() < total_num_groups {
         let new_groups = total_num_groups - builder.len();
-        let grow_by = builder.len() * 2;
+        let grow_by = new_groups * 2;
         //println!("Need to grow by {} because total group size is {}", new_groups, total_num_groups);
-        builder.append_n(new_groups, default_value);
+        builder.append_n(grow_by, default_value);
     }
     builder
 }
